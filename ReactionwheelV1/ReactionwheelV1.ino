@@ -1,17 +1,9 @@
-// November 20, 2020 James Cochrane - BD594
-// https://YouTube.com/BD594
-// Build Your Own - 1D Wannabe Cubli Reaction Wheel
-// https://www.youtube.com/watch?v=vqV6nazapFQ
-// Final Copy Nov 22, 2020 @ 8:45pm
 
-// My reaction wheel was inspired by the Cubli and ReM-RC's YouTube channel
-// https://www.youtube.com/watch?v=n_6p-1J551Y
-// https://www.youtube.com/watch?v=wFZl9MwwkB8
-
+// Example Code - November 20, 2020 James Cochrane - BD594 https://YouTube.com/BD594
 // An excellent resource for learning about IMU's and PIDS for the Arduino platform. It consist of 26 lessons created by Paul McWhorter.
 // https://www.youtube.com/watch?v=2AO_Gmh5K3Q
+// Reaction Wheel Mechanical Equation: p˙−ap=bMm(t) where a=−cθ/J and b=1/J ... cθ: rotational viscous damping constant, J wheel/hub assy rotational inertia, p = angular velocity
 
-// I derived and modified existing code from multiple sources of balance robots and other resources listed on YouTube
 
 // MAKE Sure These Libraries are Installed
 #include <MsTimer2.h>       // Internal Timer2 for ISR Routine
