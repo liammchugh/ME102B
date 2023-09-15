@@ -317,7 +317,7 @@ void ReactionWheelPWM()
      loopOnce = 1;
      }
   
- 
+//  CHANGE TO SCROLLING LOOP
   if(angle >= 20 || angle <= -20)  // if angle is greater than +/- 20° than the Nidec motor will stop
       {                                      
       digitalWrite(nidecBrake,LOW);  // Nidec motor brake ON
