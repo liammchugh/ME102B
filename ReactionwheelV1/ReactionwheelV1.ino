@@ -6,6 +6,13 @@
 
 
 // MAKE Sure These Libraries are Installed
+
+#include <ESP32Encoder.h>
+#define BIN_1 26
+#define BIN_2 25
+#define PWM 39
+#define LED_PIN 13
+
 #include <MsTimer2.h>       // Internal Timer2 for ISR Routine
 #include <PinChangeInt.h>  // Create external interrupts
 #include <MPU6050.h>      // MPU6050 library
@@ -16,6 +23,56 @@
 MPU6050 mpu6050;     // MPU6050 name mpu6050 
 int16_t accX, accY, accZ, gyroX, gyroY, gyroZ; // 6DOF 3-axis acceleration and 3-axis gyroscope variables
 //$$$$$$$$$$$$$$$$$$$ MPU 6050 $$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$
+
+//////// ENCODER //////
+
+ESP32Encoder encoder;
+
+//Setup interrupt variables ----------------------------
+volatile int count = 0; // encoder count
+volatile bool interruptCounter = false;    // check timer interrupt 1
+volatile bool deltaT = false;     // check timer interrupt 2
+int totalInterrupts = 0;   // counts the number of triggering of the alarm
+hw_timer_t * timer0 = NULL;
+hw_timer_t * timer1 = NULL;
+portMUX_TYPE timerMux0 = portMUX_INITIALIZER_UNLOCKED;
+portMUX_TYPE timerMux1 = portMUX_INITIALIZER_UNLOCKED;
+
+// setting PWM properties ----------------------------
+const int freq = 5000;
+const int ledChannel_1 = 1;
+const int ledChannel_2 = 2;
+const int ledChannel_PWM = 3;
+const int resolution = 8;
+int MAX_PWM_VOLTAGE = 165;
+int motor_PWM;
+int i = 0;
+int pwm_sign;
+float timed = 0;
+
+// encoder properties ------------------------------
+int v = 0;
+
+//Initialization ------------------------------------
+void IRAM_ATTR onTime0() {
+  portENTER_CRITICAL_ISR(&timerMux0);
+  interruptCounter = true; // the function to be called when timer interrupt is triggered
+  portEXIT_CRITICAL_ISR(&timerMux0);
+}
+
+void IRAM_ATTR onTime1() {
+  portENTER_CRITICAL_ISR(&timerMux1);
+  count = encoder.getCount( );
+  encoder.clearCount ( );
+  deltaT = true; // the function to be called when timer interrupt is triggered
+  portEXIT_CRITICAL_ISR(&timerMux1);
+}
+
+
+
+
+
+
 
 //************** Nidec 24H677H010 BLDC Motor Vars ****************
 const int nidecBrake = 8;      // Brake
@@ -137,7 +194,7 @@ void loop()
 void Code_Hall() 
 {
   countHall ++;
-} 
+}
 
 //////////////////// Hall Effect Pulse count ///////////////////////
 void countpulse()
@@ -295,8 +352,8 @@ void ReactionWheelPWM()
        delay(200);
        digitalWrite(ledsDirection,HIGH);  // Red LED ON
      }
-    digitalWrite(nidecBrake,HIGH);    // Nidec motor brake OFF 
-    digitalWrite(nidecDirection,LOW); // Nidec Direction CW
+//    digitalWrite(nidecBrake,HIGH);    // Motor brake OFF 
+    digitalWrite(nidecDirection,LOW); //  Direction CW
     analogWrite(nidecPWM,185);
     delay(4000);
     digitalWrite(nidecDirection,HIGH); // Nidec Direction CCW
