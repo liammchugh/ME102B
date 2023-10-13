@@ -18,6 +18,32 @@
 #define READ_DELAY 70
 #define sendDelay 140
 
+
+
+///////////////////////// Communication Setup /////////////////////////////////
+int WIFIDEBUG = 0; // IF TOGGLED TO 1: Don't send/receive data.
+// Create a struct_message called Packet to be sent.
+struct_message Packet;
+// Create a queue for Packet in case Packets are dropped.
+struct_message PacketQueue[120];
+
+//::::::Broadcast Variables::::::://
+esp_now_peer_info_t peerInfo;
+// REPLACE WITH THE MAC Address of your receiver
+uint8_t broadcastAddress[] = {0xB0, 0xA7, 0x32, 0xDE, 0xC1, 0xFC};
+// Callback when data is sent
+// void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
+//  sendTime = millis();
+// }
+
+// Callback when data is received
+void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
+  memcpy(&Commands, incomingData, sizeof(Commands));
+  SERIALState = Commands.COMState;
+}
+
+
+
 //::::::STATE VARIABLES::::::://
 enum STATES {IDLE, SEEKMODE};
 String state_names[] = {"IDLE", "SEEK"};
@@ -133,27 +159,6 @@ void IRAM_ATTR onTime1() {
 }
 ////////////////////// ENCODER SETUP END ////////////////////////////////////////////
 
-
-///////////////////////// Communications Setup /////////////////////////////////
-// Create a struct_message called Packet to be sent.
-struct_message Packet;
-// Create a queue for Packet in case Packets are dropped.
-struct_message PacketQueue[120];
-
-//::::::Broadcast Variables::::::://
-esp_now_peer_info_t peerInfo;
-// REPLACE WITH THE MAC Address of your receiver
-uint8_t broadcastAddress[] = {0xB0, 0xA7, 0x32, 0xDE, 0xC1, 0xFC};
-// Callback when data is sent
-// void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
-//  sendTime = millis();
-// }
-
-// Callback when data is received
-void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
-  memcpy(&Commands, incomingData, sizeof(Commands));
-  SERIALState = Commands.COMState;
-}
 
 
 
@@ -276,14 +281,13 @@ void loop() {
 
 
 
+
+
 void Get_Readings() {
   // take IR camera readingsn if newtime is over GenDelay-Lasttime
   Readings = ____; ///CREATE READINGS ARRAY
   
 }
-
-
-
 
 void Calculate_Angle(Readings, Mem_Angle) {
   //execute at specified timestep?
@@ -292,8 +296,6 @@ void Calculate_Angle(Readings, Mem_Angle) {
   Kalman_Filter(angle, angle_vel)
   angle = 
 }
-
-
 
 void syncDAQState() {
     if (Serial.available() > 0) {
@@ -327,16 +329,11 @@ void Center() {
   lasttime = millis();
 }
 
-
-
-
 ////////////////// Angle PD_pwm ////////////////////
 void PD()
 {
   PD_pwm = kp * (angle + TargetAngle) + kd * angle_speed; //PD angle loop control
 }
-
-
 
 /////////////////////////////// Kalman Filter Calculations /////////////////////
 void Kalman_Filter(double angle_m, double vel_m)
@@ -376,14 +373,11 @@ void Kalman_Filter(double angle_m, double vel_m)
   angle += K_0 * angle_err; // Posterior estimation; get the optimal angle
 }
 
-
-
 ////////////////// Angle PD_pwm ////////////////////
 void PD()
 {
   PD_pwm = kp * (angle + angle0) + kd * angle_speed; //PD angle loop control
 }
-
 
 ////////////////// Begin of Speed PI_pwm ////////////////////
 void SpeedPIout()
@@ -398,10 +392,6 @@ void SpeedPIout()
   PI_pwm = ki_speed * (targetAngle - positions) + kp_speed * (targetAngle - speeds_filter);      //speed loop control PI
 }
 ////////////////// End of Speed PI_pwm ////////////////////
-
-
-
-
 
 
 
