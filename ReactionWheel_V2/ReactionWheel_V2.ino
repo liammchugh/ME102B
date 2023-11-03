@@ -72,8 +72,8 @@ int sendTime;
 
 ////////////////////// Begin of PID parameters ///////////////////////////////
 // Good YouTube video resource for PID's https://www.youtube.com/watch?v=0vqWyramGy8
-double kp = 28;
-double ki = 0; // NOT USED
+double kp = 5;
+double ki = 2; // NOT USED
 double kd = 0.65; 
 ////////////////////// End of PID parameters /////////////////////////////////
 
@@ -250,11 +250,8 @@ void setup() {
 
 
 
-
-
-
-void loop() {
-  // put your main code here, to run repeatedly:
+void loop() { // main code here, to run repeatedly:
+  syncDAQState();
   Get_Readings();
   Calculate_Angle();
   if (deltaT) { //Speed Interrupt Action
@@ -265,7 +262,6 @@ void loop() {
 //    Serial.print(" ");
 //    Serial.println(v);
   }
-  syncDAQState();
   logData();
   switch (DAQState) {
     case (IDLE):
@@ -276,7 +272,6 @@ void loop() {
       if (SERIALState == IDLE) { DAQState = SERIALState; }
       Center();
       break;
-
 }
 
 
@@ -296,15 +291,6 @@ void Calculate_Angle(Readings, Mem_Angle) {
   Kalman_Filter(angle, angle_vel)
   angle = 
 }
-
-void syncDAQState() {
-    if (Serial.available() > 0) {
-    // Serial.read reads a single character as ASCII. Number 1 is 49 in ASCII.
-    // Serial sends character and new line character "\n", which is 10 in ASCII.
-    int SERIALState = Serial.read() - 48;
-}
-
-
 
 
 void Center() {
@@ -395,9 +381,12 @@ void SpeedPIout()
 
 
 
-
-
-
+void syncDAQState() {
+    if (Serial.available() > 0) {
+    // Serial.read reads a single character as ASCII. Number 1 is 49 in ASCII.
+    // Serial sends character and new line character "\n", which is 10 in ASCII.
+    int SERIALState = Serial.read() - 48;
+}
 
 /////////// DATALOGGING ////////////////////////////////////////
 void logData() {
