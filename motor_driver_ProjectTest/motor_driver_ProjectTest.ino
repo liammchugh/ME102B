@@ -7,7 +7,7 @@
 ESP32Encoder encoder;
 
 //Setup interrupt variables ----------------------------
-volatile int count = 0; // encoder count
+volatile float count = 0; // encoder count
 volatile bool interruptCounter = false;    // check timer interrupt 1
 volatile bool deltaT = false;     // check timer interrupt 2
 int totalInterrupts = 0;   // counts the number of triggering of the alarm
@@ -27,10 +27,11 @@ int motor_PWM;
 int i = 0;
 int pwm_sign;
 float timed = 0;
+float rate = 500; //ADJUST RATE VALUE LOWER FOR HIGHER 
+float cpr = 211.2; //encoder multiplied by gear ratio
 
 // encoder properties ------------------------------
-int v = 0;
-
+float v = 0;
 
 //Initialization ------------------------------------
 void IRAM_ATTR onTime0() {
@@ -54,7 +55,7 @@ void setup() {
   
   Serial.begin(115200);
   ESP32Encoder::useInternalWeakPullResistors = UP; // Enable the weak pull up resistors
-  encoder.attachHalfQuad(27, 33); // Attache pins for use as encoder pins
+  encoder.attachFullQuad(33, 27); // Attach pins for use as encoder pins
   encoder.setCount(0);  // set starting count value after attaching
 
   // configure LED PWM functionalitites
@@ -74,7 +75,7 @@ void setup() {
 
   timer1 = timerBegin(1, 80, true);  // timer 1, MWDT clock period = 12.5 ns * TIMGn_Tx_WDT_CLK_PRESCALE -> 12.5 ns * 80 -> 1000 ns = 1 us, countUp
   timerAttachInterrupt(timer1, &onTime1, true); // edge (not level) triggered 
-  timerAlarmWrite(timer1, 10000, true); // 10000 * 1 us = 10 ms, autoreload true
+  timerAlarmWrite(timer1, 10000, true); // 10000 * 1 us = 10 ms, deltaT period
 
   // at least enable the timer alarms
   timerAlarmEnable(timer0); // enable
@@ -84,34 +85,36 @@ void setup() {
 }
 
 void loop() {
-    float sineValue = sin(millis() / 2000.0 - timed);
-    pwm_sign = round(MAX_PWM_VOLTAGE / 2 + MAX_PWM_VOLTAGE / 2 * sineValue);
-
+    float sineValue = sin(millis()/rate);
+//    pwm_sign = round(MAX_PWM_VOLTAGE * sineValue);
+    pwm_sign = 200;
     if (i == 0) { 
         digitalWrite(LED_PIN, HIGH);
         ledcWrite(ledChannel_2, LOW); // clockwise
         motor_PWM = pwm_sign;
-        ledcWrite(ledChannel_1, pwm_sign); // power control while cw
-        if (sineValue < -0.99) {
+        ledcWrite(ledChannel_1, motor_PWM); // power control while cw
+        if (pwm_sign < 0) {
             i = 1;
-            timed = millis() / 1000.0;
+//            timed = millis()/rate;
         }
     } else { 
         digitalWrite(LED_PIN, LOW);
         ledcWrite(ledChannel_1, LOW); // ccw
         motor_PWM = -pwm_sign;
-        ledcWrite(ledChannel_2, pwm_sign); // power control while ccw
-        if (sineValue < -0.99) {
+        ledcWrite(ledChannel_2, motor_PWM); // power control while ccw
+        if (pwm_sign > 0) {
             i = 0;
-            timed = millis() / 1000.0;
+            timed = millis() / rate;
         }
     }
 
   if (deltaT) {
     deltaT = false;// RESET deltaT FLAG HERE (hint: see the 3 lines after if(interruptCounter))
-    v = count;
-    Serial.println("motor_PWM, speed");
-    Serial.print(motor_PWM);
+    v = count/(cpr)*(100*60); ///
+    Serial.println("PWM_signed, speed");
+//    Serial.print(sineValue);
+//    Serial.print(" ");
+    Serial.print(pwm_sign);
     Serial.print(" ");
     Serial.println(v);
   }

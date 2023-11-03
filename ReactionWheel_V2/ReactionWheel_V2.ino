@@ -19,7 +19,6 @@
 #define sendDelay 140
 
 
-
 ///////////////////////// Communication Setup /////////////////////////////////
 int WIFIDEBUG = 0; // IF TOGGLED TO 1: Don't send/receive data.
 // Create a struct_message called Packet to be sent.
@@ -106,7 +105,7 @@ int loopcount; // Counter var for D13 onboard LED flash evey 1 second
 
 
 
-//######################## Begin of Kalman Filter Vars ###################################################
+//######################## Begin of Kalman Filter UNUSED ###################################################
 // Good YouTube video resource for Kalman Filter https://www.youtube.com/watch?v=mwn8xhgNpFY
 float Q_angle = 0.001;    // Covariance of gyroscope noise    
 float Q_gyro = 0.003;    // Covariance of gyroscope drift noise
@@ -116,7 +115,7 @@ float dt = 0.005; // The value of dt is the filter sampling time
 float K1 = 0.05; // a function containing the Kalman gain is used to calculate the deviation of the optimal estimate
 float K_0,K_1,t_0,t_1;
 float angle_err;
-float q_bias;    // Gyroscope Drift
+float q_bias;    // Instrument Drift
 float angle;
 float angleY_one;
 float angle_speed;
@@ -131,7 +130,8 @@ float  PCt_0, PCt_1, E;
 ESP32Encoder encoder;
 
 //Setup interrupt variables ----------------------------
-volatile int count = 0; // encoder count
+volatile float count = 0; // encoder count
+float cpr = 211.2; //encoder multiplied by gear ratio
 volatile bool interruptCounter = false;    // check timer interrupt 1
 volatile bool deltaT = false;     // check timer interrupt 2
 int totalInterrupts = 0;   // counts the number of triggering of the alarm
@@ -191,7 +191,7 @@ void setup() {
 
   timer1 = timerBegin(1, 80, true);  // timer 1, MWDT clock period = 12.5 ns * TIMGn_Tx_WDT_CLK_PRESCALE -> 12.5 ns * 80 -> 1000 ns = 1 us, countUp
   timerAttachInterrupt(timer1, &onTime1, true); // edge (not level) triggered 
-  timerAlarmWrite(timer1, 10000, true); // 10000 * 1 us = 10 ms, autoreload true
+  timerAlarmWrite(timer1, 10000, true); // 10000 * 1 us = 10 ms, deltaT period
 
   // at least enable the timer alarms
   timerAlarmEnable(timer0); // enable
@@ -238,14 +238,7 @@ void setup() {
   DAQState = IDLE;
 }
 
-
-
-
 }
-
-
-
-
 
 
 
@@ -255,7 +248,7 @@ void loop() { // main code here, to run repeatedly:
   Get_Readings();
   Calculate_Angle();
   if (deltaT) { //Speed Interrupt Action
-    wheelspd = count; //speed in counts per Timer1 interrupt
+    wheelspd = count/cpr*(100*60); //speed in counts per Timer1 interrupt
     deltaT = false;
 //    Serial.println("motor_PWM, speed");
 //    Serial.print(motor_PWM);
@@ -288,8 +281,8 @@ void Calculate_Angle(Readings, Mem_Angle) {
   //execute at specified timestep?
   //calculate angle from ideal
   //use angle memory to calculate angular velocity
-  Kalman_Filter(angle, angle_vel)
   angle = 
+  Kalman_Filter(angle, angle_vel)
 }
 
 
