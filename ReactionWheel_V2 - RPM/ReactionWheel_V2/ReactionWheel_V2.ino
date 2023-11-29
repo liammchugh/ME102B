@@ -107,12 +107,19 @@ double ki = 0;
 double kd = 0.0; 
 ////////////////////// End of PID parameters /////////////////////////////////
 
-///////////////////////////////// Begin of PI speed loop Vars -UNUSED- //////////////////////
-double kp_speed =  10; 
-double ki_speed = 0.72;
+///////////////////////////////// Begin of PI speed loop Vars //////////////////////
+double kp_speed = 5; 
+double ki_speed = 5;
 double kd_speed = 0; // NOT USED  
 float pwmOut=0;
 float pwmOut2=0; 
+int omegaSpeed = 0;
+int omegaDes = 30;
+int omegaMax = 22;   // CHANGE THIS VALUE TO YOUR MEASURED MAXIMUM SPEED
+int D = 0;
+byte state = 0;
+int potReading = 0;
+float SumErr = 0;
 ///////////////////////////////// End of PID speed loop Vars //////////////////////
 
 
@@ -326,6 +333,7 @@ void loop() { // main code here, to run repeatedly:
       break;
     case (SEEKMODE):
       if (CommandState == IDLE) { DAQState = CommandState; }
+      ReactionWheelPWM();
       if (millis() - lasttime > 1/(ctrl_freq)) {
       Center();
       lasttime = millis();
@@ -408,8 +416,6 @@ void Calculate_Angle() {
 
 void Center() {
   PID();         //angle loop PD control
-  ReactionWheelPWM();
-  
   // cc++;
   // if(cc>=6)     //every 6th control loop，enter PI algorithm
   // {
@@ -432,19 +438,29 @@ void PID(){
 }
 
 void ReactionWheelPWM(){
+    if (deltaT) {
+        portENTER_CRITICAL(&timerMux1);
+        deltaT = false;
+        portEXIT_CRITICAL(&timerMux1);
+        omegaSpeed = count;
+        float err = motor_PWM - omegaSpeed;
+        SumErr = SumErr + err;
+        D = kp_speed*err + ki_speed*SumErr;
+    }
+  
   if (motor_PWM > 0) {
     if (motor_PWM > MAX_PWM_VOLTAGE) { 
       motor_PWM = MAX_PWM_VOLTAGE;
     }
     ledcWrite(ledChannel_2, LOW); // clockwise
-    ledcWrite(ledChannel_1, motor_PWM); // power control while cw
+    ledcWrite(ledChannel_1, D); // power control while cw
   } else {
     motor_PWM = abs(motor_PWM);
     if (motor_PWM > MAX_PWM_VOLTAGE) { 
       motor_PWM = MAX_PWM_VOLTAGE;
     }
     ledcWrite(ledChannel_1, LOW); // ccw
-    ledcWrite(ledChannel_2, motor_PWM); // power control while ccw
+    ledcWrite(ledChannel_2, D); // power control while ccw
   }
 }
 
