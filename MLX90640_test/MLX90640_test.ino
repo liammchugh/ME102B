@@ -70,12 +70,14 @@ void loop() {
   }
 
   int error = iMax - WIDTH/2;
-
+  Serial.print(iMax);
+  Serial.print("  ");
   for(int i = 0; i < WIDTH; i++){
     Serial.print(line_filt[i]);
     Serial.print(",");
   }
-  Serial.println(iMax);
+  Serial.println("");
+  
 
   /* for(int i = 0; i < 767; i++){
     Serial.print(frame[i]);

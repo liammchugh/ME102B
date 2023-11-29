@@ -1,58 +1,81 @@
 //MAIN CODE 
 //::::::Libraries::::::://
 #include <Arduino.h>
-#include <esp_now.h>
-#include <WiFi.h>
-#include <Wire.h>
-#include <SPI.h>
-#include "Adafruit_MAX31855.h"
+//#include <esp_now.h>
+//#include <WiFi.h>
+//#include <Wire.h>
+//#include <SPI.h>
+//#include "Adafruit_MAX31855.h"
 #include <ESP32Encoder.h>
+#include <Adafruit_MLX90640.h>
 
 // DEFINE ESP PINS
 #define BIN_1 26
 #define BIN_2 25
 #define PWM 39
 #define LED_PIN 13
+#define BTN 4
+
 
 // DEFINE SENSOR READRATE
 #define READ_DELAY 70
 #define sendDelay 140
 
+/////////////////////IR SETUP///////////////////////////
+#define WIDTH  32
+#define HEIGHT 24
+#define RADIUS 8 // vertical distance to look at
+Adafruit_MLX90640 mlx;
+int iMax = 0;
+float frame[WIDTH*HEIGHT]; // buffer for full frame of temperatures
+
 
 ///////////////////////// Communication Setup /////////////////////////////////
-int WIFIDEBUG = 0; // IF TOGGLED TO 1: Don't send/receive data.
+int WIFIDEBUG = 1; // IF TOGGLED TO 1: Don't send/receive data.
+int DEBUG = 1 ;
+short int queueLength = 0;
 // Create a struct_message called Packet to be sent.
-struct_message Packet;
-// Create a queue for Packet in case Packets are dropped.
-struct_message PacketQueue[120];
+//struct struct_message Packet;
+//// Create a queue for Packet in case Packets are dropped.
+//struct struct_message PacketQueue[120];
 
 //::::::Broadcast Variables::::::://
-esp_now_peer_info_t peerInfo;
+//esp_now_peer_info_t peerInfo;
 // REPLACE WITH THE MAC Address of your receiver
-uint8_t broadcastAddress[] = {0xB0, 0xA7, 0x32, 0xDE, 0xC1, 0xFC};
+//uint8_t broadcastAddress[] = {0xB0, 0xA7, 0x32, 0xDE, 0xC1, 0xFC};
 // Callback when data is sent
 // void OnDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
 //  sendTime = millis();
 // }
 
 // Callback when data is received
-void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
-  memcpy(&Commands, incomingData, sizeof(Commands));
-  SERIALState = Commands.COMState;
-}
-
+//void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
+//  memcpy(&Commands, incomingData, sizeof(Commands));
+//  SERIALState = Commands.COMState;
+//}
 
 
 //::::::STATE VARIABLES::::::://
-enum STATES {IDLE, SEEKMODE};
-String state_names[] = {"IDLE", "SEEK"};
-const float pi = 3.1415
+enum STATES {IDLE, CTDWN, SEEKMODE}; //add initialize state for countdown
+String state_names[] = {"IDLE", "CTDWN", "SEEK"};
+const float pi = 3.1415;
 int DAQState;
-int SERIALState;
-float angle = pi; // ANGLE FROM DESIRED ORIENTATION. Initiated as 180deg(pi)
+int CommandState;
+int ctdwn_time = 2000;
+float angle = 180; // ANGLE FROM DESIRED ORIENTATION. Initiated as 180deg(pi)
 double targetAngle = 0; // Angle target point
 float loopOnce=0; // Used to reset loop routine
 
+int event_timer;
+int del = 100;
+//Setup variables ------------------------------------
+volatile bool buttonIsPressed = false;
+
+//Initialization ------------------------------------
+void IRAM_ATTR isr() {  // the function to be called when interrupt is triggered
+  if (millis()-event_timer > del) {
+  buttonIsPressed = true; }
+}
 
 // setting PWM properties ----------------------------
 const int freq = 5000;
@@ -68,19 +91,21 @@ float timed = 0;
 int lasttime;
 int sendTime;
 
+///////////////////// Control Parameters ///////////////////////////
+int ctrl_freq = 50;
+int max_rpm = 2000;
 
 ////////////////////// Begin of PID parameters ///////////////////////////////
 // Good YouTube video resource for PID's https://www.youtube.com/watch?v=0vqWyramGy8
-double kp = 5;
+double kp = 50;
 double ki = 2; // NOT USED
 double kd = 0.65; 
 ////////////////////// End of PID parameters /////////////////////////////////
 
 ///////////////////////////////// Begin of PID speed loop Vars //////////////////////
-double kp_speed =  3; 
+double kp_speed =  50; 
 double ki_speed = 0.072;
 double kd_speed = 0; // NOT USED  
-int PD_pwm;  //angle output
 float pwmOut=0;
 float pwmOut2=0; 
 ///////////////////////////////// End of PID speed loop Vars //////////////////////
@@ -89,7 +114,6 @@ float pwmOut2=0;
 //////////////////////////////// Begin of PI_pwm Vars //////////////////////////
 float speeds_filterold=0;
 float positions=0;
-double PI_pwm;
 int cc;
 float speeds_filter;
 //////////////////////////////// End of PI_pwm Vars /////////////////////////////
@@ -100,7 +124,6 @@ int pulseCount = 0;
 int rwPulse;
 ////////////////////// End of pulse count //////////////////////////
 int loopcount; // Counter var for D13 onboard LED flash evey 1 second
-
 
 
 
@@ -116,7 +139,6 @@ float K1 = 0.05; // a function containing the Kalman gain is used to calculate t
 float K_0,K_1,t_0,t_1;
 float angle_err;
 float q_bias;    // Instrument Drift
-float angle;
 float angleY_one;
 float angle_speed;
 float Pdot[4] = { 0, 0, 0, 0};
@@ -161,8 +183,6 @@ void IRAM_ATTR onTime1() {
 
 
 
-
-
 void setup() {
   Serial.begin(115200);
   while (!Serial) delay(1); // wait for Serial
@@ -171,7 +191,7 @@ void setup() {
   
   Serial.begin(115200);
   ESP32Encoder::useInternalWeakPullResistors = UP; // Enable the weak pull up resistors
-  encoder.attachHalfQuad(27, 33); // Attache pins for use as encoder pins
+  encoder.attachHalfQuad(33, 27); // Attache pins for use as encoder pins
   encoder.setCount(0);  // set starting count value after attaching
 
   // configure LED PWM functionalitites
@@ -200,43 +220,66 @@ void setup() {
   pwm_sign = MAX_PWM_VOLTAGE;
 
 
+  ////////////////////////////////Event//////////////////////////
+  pinMode(BTN, INPUT);  
+  attachInterrupt(BTN, isr, RISING);  // set the "BTN" pin as the interrupt pin;
+  event_timer = millis();
+
+
 
 ////////////////// Communication //////////////////////////////////
 
   // Broadcast setup.
   // Set device as a Wi-Fi Station
-  WiFi.mode(WIFI_STA);
-  // Print MAC Accress on startup for easier connections
-  Serial.println(WiFi.macAddress());
+//  WiFi.mode(WIFI_STA);
+//  // Print MAC Accress on startup for easier connections
+//  Serial.println(WiFi.macAddress());
 
   // Init ESP-NOW
-  if (esp_now_init() != ESP_OK) {
-    Serial.println("Error initializing ESP-NOW");
-    return;
-  }
+//  if (esp_now_init() != ESP_OK) {
+//    Serial.println("Error initializing ESP-NOW");
+//    return;
+//  }
 
   // Once ESPNow is successfully Init, we will register for Send CB to
   // get the status of Trasnmitted packet
   // esp_now_register_send_cb(OnDataSent);
 
   // Register peer
-  memcpy(peerInfo.peer_addr, broadcastAddress, 6);
-  peerInfo.channel = 0;
-  peerInfo.encrypt = false;
+//  memcpy(peerInfo.peer_addr, broadcastAddress, 6);
+//  peerInfo.channel = 0;
+//  peerInfo.encrypt = false;
 
   // Add peer
-  if (esp_now_add_peer(&peerInfo) != ESP_OK){
-    Serial.println("Failed to add peer");
-    return;
-  }
+//  if (esp_now_add_peer(&peerInfo) != ESP_OK){
+//    Serial.println("Failed to add peer");
+//    return;
+//  }
   // Register for a callback function that will be called when data is received
-  if (!WIFIDEBUG) {
-    esp_now_register_recv_cb(OnDataRecv);
-  }
+//  if (!WIFIDEBUG) {
+//    esp_now_register_recv_cb(OnDataRecv);
+//  }
 
   sendTime = millis();
+  lasttime = millis();
   DAQState = IDLE;
-}
+
+
+  if (! mlx.begin(MLX90640_I2CADDR_DEFAULT, &Wire)) {
+    Serial.println("MLX90640 not found!");
+  } else {
+    Serial.println("Found Adafruit MLX90640");
+
+    Serial.print("Serial number: ");
+    Serial.print(mlx.serialNumber[0], HEX);
+    Serial.print(mlx.serialNumber[1], HEX);
+    Serial.println(mlx.serialNumber[2], HEX);
+  }
+
+  mlx.setMode(MLX90640_CHESS);
+  mlx.setResolution(MLX90640_ADC_16BIT);
+  mlx.setRefreshRate(MLX90640_16_HZ);
+  Wire.setClock(1000000); // max 1 MHz
 
 }
 
@@ -258,60 +301,146 @@ void loop() { // main code here, to run repeatedly:
   logData();
   switch (DAQState) {
     case (IDLE):
-      if (SERIALState == SEEKMODE) { DAQState = SERIALState; }
-      idle();
+      if (CommandState == CTDWN) { DAQState = CommandState; }
+      if (buttonIsPressed == true && millis()-event_timer > del) {
+        DAQState = CTDWN;
+        event_timer = millis();
+      }
+      break;
+    case (CTDWN): 
+      digitalWrite(13, HIGH);
+      if ((millis() - event_timer) > ctdwn_time){
+        DAQState = SEEKMODE;
+        digitalWrite(13, LOW);
+      }
       break;
     case (SEEKMODE):
-      if (SERIALState == IDLE) { DAQState = SERIALState; }
+      if (CommandState == IDLE) { DAQState = CommandState; }
+      if (millis() - lasttime > 1000/(ctrl_freq)) {
       Center();
+      lasttime = millis();
+      }
+      if (buttonIsPressed == true && millis()-event_timer > del) {
+        DAQState = IDLE;
+        event_timer = millis();
+      }
       break;
+  }
 }
 
 
-
-
+void syncDAQState() {
+    if (Serial.available() > 0) {
+    // Serial.read reads a single character as ASCII. Number 1 is 49 in ASCII.
+    // Serial sends character and new line character "\n", which is 10 in ASCII.
+    int CommandState = Serial.read() - 48;}
+}
 
 void Get_Readings() {
   // take IR camera readingsn if newtime is over GenDelay-Lasttime
-  Readings = ____; ///CREATE READINGS ARRAY
-  
+  mlx.getFrame(frame);
+
+  // Compress to 1D array by averaging
+  int i;
+  int n;
+  float line[WIDTH];
+  for(int col = 0; col < WIDTH; col++){
+    n = 0;
+    for(int row = HEIGHT/2 - RADIUS; row <= HEIGHT/2 + RADIUS; row++){
+      i = WIDTH * row + col;
+      if(!isnan(frame[i])){
+        line[col] += frame[i];
+        n++;
+      }
+    }
+    line[col] = line[col] / n;
+  }
+
+  // Blur to smooth data
+  float line_filt[WIDTH];
+  line_filt[0] = 0.25 * line[0] + 0.5 * line[0] + 0.25 * line[1];
+  for(int i = 1; i < WIDTH-1; i++){
+    line_filt[i] = 0.25 * line[i] + 0.5 * line[i+1] + 0.25 * line[i+2];
+  }
+  line_filt[WIDTH-1] = 0.25 * line[WIDTH-2] + 0.5 * line[WIDTH-1] + 0.25 * line[WIDTH-1];
+
+  // Find max temp location
+  int iMax = 0;
+  float max = 0;
+  for(int i = 0; i < WIDTH; i++){
+    if(line_filt[i] > max){
+      max = line_filt[i];
+      iMax = i;
+    }
+  }
+  Serial.print(iMax);
+//  Serial.print("  ");
+//  for(int i = 0; i < WIDTH; i++){
+//    Serial.print(line_filt[i]);
+//    Serial.print(",");
+//  }
+//  Serial.println("");
 }
 
-void Calculate_Angle(Readings, Mem_Angle) {
-  //execute at specified timestep?
-  //calculate angle from ideal
+void Calculate_Angle() {
+  //calculate angle from ideal. Use for state-space control
   //use angle memory to calculate angular velocity
-  angle = 
-  Kalman_Filter(angle, angle_vel)
+  float error = iMax - WIDTH/2;
+  angle = error*(110/32);
+//  Kalman_Filter(angle, angle_vel)
 }
 
 
 void Center() {
   PD();         //angle loop PD control
   ReactionWheelPWM();
-
+  
   cc++;
-  if(cc>=8)     //5*8=40，enter PI algorithm of speed per 40ms
+  if(cc>=6)     //every 6th control loop，enter PI algorithm
   {
     SpeedPIout();   
     cc=0;  //Clear
   }
-  // The onboard LED / D13 blinks every second
-  // To measure the 100Hz ie 5ms ISR routine put the digitalWrite statement out side of the loopcount
-  // and put an oscilloscope probe on to pin D13
  
   loopcount++;
-  if(loopcount == 200)  { // used to blink LED every 1 second.
+  if(loopcount == 100)  { // used to blink LED every 100 control loops.
     loopcount = 0;
-    digitalWrite(13, !digitalRead(13));
+    digitalWrite(13, !digitalRead(13));}
+  }
 
-  lasttime = millis();
-}
 
 ////////////////// Angle PD_pwm ////////////////////
-void PD()
+void PD(){
+  motor_PWM = kp * (angle + targetAngle) + kd * angle_speed; //PD angle loop control
+}
+
+
+////////////////// Angle PI_pwm ////////////////////
+void SpeedPIout()
 {
-  PD_pwm = kp * (angle + TargetAngle) + kd * angle_speed; //PD angle loop control
+  float speeds = (count) * 1.0;      //speed  pulse value
+  rwPulse = 0;
+  speeds_filterold *= 0.7;         //first-order complementary filtering
+  speeds_filter = speeds_filterold + speeds * 0.3;
+  speeds_filterold = speeds_filter;
+  positions += speeds_filter;
+  positions = constrain(positions, -3550,3550);    //Anti-integral saturation
+  motor_PWM = ki_speed * (targetAngle - positions) + kp_speed * (targetAngle - speeds_filter);      //speed loop control PI
+}
+
+void ReactionWheelPWM(){
+    if (motor_PWM > MAX_PWM_VOLTAGE) { 
+      motor_PWM = MAX_PWM_VOLTAGE;
+    }
+      if (angle > 0) { 
+        digitalWrite(LED_PIN, HIGH);
+        ledcWrite(ledChannel_2, LOW); // clockwise
+        ledcWrite(ledChannel_1, motor_PWM); // power control while cw
+    } else { //angle < 0 
+        digitalWrite(LED_PIN, LOW);
+        ledcWrite(ledChannel_1, LOW); // ccw
+        ledcWrite(ledChannel_2, motor_PWM); // power control while ccw
+    }
 }
 
 /////////////////////////////// Kalman Filter Calculations /////////////////////
@@ -352,78 +481,48 @@ void Kalman_Filter(double angle_m, double vel_m)
   angle += K_0 * angle_err; // Posterior estimation; get the optimal angle
 }
 
-////////////////// Angle PD_pwm ////////////////////
-void PD()
-{
-  PD_pwm = kp * (angle + angle0) + kd * angle_speed; //PD angle loop control
-}
-
-////////////////// Begin of Speed PI_pwm ////////////////////
-void SpeedPIout()
-{
-  float speeds = (count) * 1.0;      //speed  pulse value
-  rwPulse = 0;
-  speeds_filterold *= 0.7;         //first-order complementary filtering
-  speeds_filter = speeds_filterold + speeds * 0.3;
-  speeds_filterold = speeds_filter;
-  positions += speeds_filter;
-  positions = constrain(positions, -3550,3550);    //Anti-integral saturation
-  PI_pwm = ki_speed * (targetAngle - positions) + kp_speed * (targetAngle - speeds_filter);      //speed loop control PI
-}
-////////////////// End of Speed PI_pwm ////////////////////
 
 
-
-void syncDAQState() {
-    if (Serial.available() > 0) {
-    // Serial.read reads a single character as ASCII. Number 1 is 49 in ASCII.
-    // Serial sends character and new line character "\n", which is 10 in ASCII.
-    int SERIALState = Serial.read() - 48;
-}
-
-/////////// DATALOGGING ////////////////////////////////////////
+//////////////// DATALOGGING ////////////////////////////////////////
 void logData() {
-  printSensorReadings();
+  if (DEBUG) {printReadings();}
   if (millis()-sendTime > sendDelay) {
     sendTime = millis();
-    sendData();
-    // saveData();
+    addPacketToQueue();
+    sendQueue();
   }
 }
 
-
-// Send data to COM board.
-void sendData() {
-  addPacketToQueue();
-  sendQueue();
+void printReadings() {
+  Serial.print(iMax);
+  Serial.print("   ");
+  Serial.print(angle);
 }
 
 void addPacketToQueue() {
-  if (queueLength < 40) {
-    queueLength += 1;
-    PacketQueue[queueLength].messageTime = millis();
-    PacketQueue[queueLength].angle = angle;
-    PacketQueue[queueLength].queueLength = queueLength;
-    PacketQueue[queueLength].DAQState    = DAQState;
-  }
+//  if (queueLength < 40) {
+//    queueLength += 1;
+//    PacketQueue[queueLength].messageTime = millis();
+//    PacketQueue[queueLength].angle = angle;
+//    PacketQueue[queueLength].queueLength = queueLength;
+//    PacketQueue[queueLength].DAQState    = DAQState;
+//  }
 }
 
-void sendQueue() {
-  if (queueLength < 0) {
-    return;
-  }
+void sendQueue() { //need to add supporting structs
+//  if (queueLength < 0) {
+//    return;
+//  }
   // Set values to send
-  Packet = PacketQueue[queueLength];
-
-  if (!WIFIDEBUG) {
-    // Send message via ESP-NOW
-    esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *) &Packet, sizeof(Packet));
-
-    if (result == ESP_OK) {
-      // Serial.println("Sent with success Data Send");
-      queueLength -= 1;
-    } else {
-      Serial.println("Error sending the data");
-    }
-  }
+//  Packet = PacketQueue[queueLength];
+//  if (!WIFIDEBUG) {
+//    // Send message via ESP-NOW
+//    esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *) &Packet, sizeof(Packet));
+//    if (result == ESP_OK) {
+//      // Serial.println("Sent with success Data Send");
+//      queueLength -= 1;
+//    } else {
+//      Serial.println("Error sending the data");
+//    }
+//  }
 }
