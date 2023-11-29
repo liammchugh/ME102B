@@ -102,9 +102,9 @@ int lastcalc = 0;
 
 ////////////////////// Begin of PID parameters ///////////////////////////////
 // Good YouTube video resource for PID's https://www.youtube.com/watch?v=0vqWyramGy8
-double kp = 4;
+double kp = 0.5; //75
 double ki = 0; 
-double kd = 0.0; 
+double kd = 0.0025; 
 ////////////////////// End of PID parameters /////////////////////////////////
 
 ///////////////////////////////// Begin of PI speed loop Vars -UNUSED- //////////////////////
@@ -326,10 +326,10 @@ void loop() { // main code here, to run repeatedly:
       break;
     case (SEEKMODE):
       if (CommandState == IDLE) { DAQState = CommandState; }
-      if (millis() - lasttime > 1/(ctrl_freq)) {
+      // if (millis() - lasttime > 1/(ctrl_freq)) {
       Center();
       lasttime = millis();
-      }
+      // }
       if (buttonIsPressed == true && millis()-event_timer > del) {
         CommandState = IDLE;
         event_timer = millis();
@@ -439,12 +439,13 @@ void ReactionWheelPWM(){
     ledcWrite(ledChannel_2, LOW); // clockwise
     ledcWrite(ledChannel_1, motor_PWM); // power control while cw
   } else {
-    motor_PWM = abs(motor_PWM);
-    if (motor_PWM > MAX_PWM_VOLTAGE) { 
-      motor_PWM = MAX_PWM_VOLTAGE;
+    int pos_motor_PWM = abs(motor_PWM);
+    if (pos_motor_PWM > MAX_PWM_VOLTAGE) { 
+      pos_motor_PWM = MAX_PWM_VOLTAGE;
+      motor_PWM = -MAX_PWM_VOLTAGE;
     }
     ledcWrite(ledChannel_1, LOW); // ccw
-    ledcWrite(ledChannel_2, motor_PWM); // power control while ccw
+    ledcWrite(ledChannel_2, pos_motor_PWM); // power control while ccw
   }
 }
 
