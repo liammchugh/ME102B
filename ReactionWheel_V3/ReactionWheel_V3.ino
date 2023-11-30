@@ -24,7 +24,7 @@
 /////////////////////IR SETUP///////////////////////////
 #define WIDTH  32
 #define HEIGHT 24
-#define RADIUS 8 // vertical distance to look at
+#define RADIUS 4 // vertical distance to look at
 Adafruit_MLX90640 mlx;
 int iMax = 0;
 int error = 0;
@@ -62,7 +62,7 @@ String state_names[] = {"IDLE", "CTDWN", "SEEK"};
 const float pi = 3.1415;
 int DAQState;
 int CommandState;
-int ctdwn_time = 2000;
+int ctdwn_time = 2000; //ms
 float angle = 180; // ANGLE FROM DESIRED ORIENTATION. Initiated as 180deg(pi)
 float lastangle = 180; //used for speed deriv.
 double targetAngle = 0; // Angle target point
@@ -77,7 +77,6 @@ volatile bool buttonIsPressed = false;
 void IRAM_ATTR isr() {  // the function to be called when interrupt is triggered
   if (millis()-event_timer > del) {
   buttonIsPressed = true; }
-  Serial.println("Boop");
 }
 
 // setting PWM properties ----------------------------
@@ -86,36 +85,39 @@ const int ledChannel_1 = 1;
 const int ledChannel_2 = 2;
 const int ledChannel_PWM = 3;
 const int resolution = 8;
-int MAX_PWM_VOLTAGE = 240;
-int motor_PWM;
+int motor_PWM = 0;
+int MAX_PWM = 250;
+int lastrpm;
 int i = 0;
-int pwm_sign;
 float timed = 0;
 int lasttime;
 int sendTime;
 
 ///////////////////// Control Parameters ///////////////////////////
-int ctrl_freq = 16;
-int deltat = 1/16;
-int max_rpm = 2000;
+int read_freq = 16; //SET CONSERVATIVELY - IR CAMERA MAX IS 16
+int lastread = 0;
+int motor_RPM = 0;
+int MAX_RPM = 700;
 int lastcalc = 0;
+float deltat = 0.0; //angle measurement interval
 
 ////////////////////// Begin of PID parameters ///////////////////////////////
 // Good YouTube video resource for PID's https://www.youtube.com/watch?v=0vqWyramGy8
 double kp = 4;
 double ki = 0;
 double kd = 0.0;
+volatile bool rd = false;
 ////////////////////// End of PID parameters /////////////////////////////////
 
-///////////////////////////////// Begin of PI speed loop Vars //////////////////////
-double kp_speed = 5; 
-double ki_speed = 5;
+///////////////////////////////// Begin of Wheel Speed Ctrl Vars //////////////////////
+double kp_speed = 10; 
+double ki_speed = .72;
 double kd_speed = 0; // NOT USED  
 float pwmOut=0;
 float pwmOut2=0; 
 int omegaSpeed = 0;
 int omegaDes = 30;
-int omegaMax = 22;   // CHANGE THIS VALUE TO YOUR MEASURED MAXIMUM SPEED
+int omegaMax = 2200;   // CHANGE THIS VALUE TO YOUR MEASURED MAXIMUM SPEED
 int D = 0;
 byte state = 0;
 int potReading = 0;
@@ -124,26 +126,16 @@ float SumErr = 0;
 
 
 //////////////////////////////// Begin of PI_pwm Vars //////////////////////////
-float speeds_filterold=0;
 float positions=0;
 int cc;
 float speeds_filter;
 //////////////////////////////// End of PI_pwm Vars /////////////////////////////
 
-////////////////////// Begin of pulse count /////////////////////////
-int rw = 0;
-int pulseCount = 0;
-int rwPulse;
-////////////////////// End of pulse count //////////////////////////
-int loopcount; // Counter var for D13 onboard LED flash evey 1 second
-
-
-
 
 //######################## Begin of Kalman Filter UNUSED ###################################################
 // Good YouTube video resource for Kalman Filter https://www.youtube.com/watch?v=mwn8xhgNpFY
-float Q_angle = 0.001;    // Covariance of gyroscope noise    
-float Q_gyro = 0.003;    // Covariance of gyroscope drift noise
+float Q_angle = 0.001;    // Covariance of angle noise    
+float Q_gyro = 0.003;    // Covariance of angle drift noise
 float R_angle = 0.5;    // Covariance of accelerometer
 char C_0 = 1;
 float dt = 0.005; // The value of dt is the filter sampling time
@@ -152,7 +144,7 @@ float K_0,K_1,t_0,t_1;
 float angle_err;
 float q_bias;    // Instrument Drift
 float angleY_one;
-float angle_speed;
+float angle_speed = 0.0;
 float Pdot[4] = { 0, 0, 0, 0};
 float P[2][2] = {{ 1, 0 }, { 0, 1 }};
 float  PCt_0, PCt_1, E;
@@ -165,6 +157,7 @@ ESP32Encoder encoder;
 
 //Setup interrupt variables ----------------------------
 volatile float count = 0; // encoder count
+int wheelspd = 0;
 float cpr = 211.2; //encoder multiplied by gear ratio
 volatile bool interruptCounter = false;    // check timer interrupt 1
 volatile bool deltaT = false;     // check timer interrupt 2
@@ -174,10 +167,7 @@ hw_timer_t * timer1 = NULL;
 portMUX_TYPE timerMux0 = portMUX_INITIALIZER_UNLOCKED;
 portMUX_TYPE timerMux1 = portMUX_INITIALIZER_UNLOCKED;
 
-// encoder properties ------------------------------
-int wheelspd = 0;
-
-//Initialization ------------------------------------
+//Interrupt Initialization ------------------------------------
 void IRAM_ATTR onTime0() {
   portENTER_CRITICAL_ISR(&timerMux0);
   interruptCounter = true; // the function to be called when timer interrupt is triggered
@@ -198,10 +188,9 @@ void IRAM_ATTR onTime1() {
 void setup() {
   Serial.begin(115200);
   while (!Serial) delay(1); // wait for Serial
+  Serial.print("Serial Start");
   pinMode(LED_PIN, OUTPUT); // configures the specified pin to behave either as an input or an output
   digitalWrite(LED_PIN, LOW); // sets the initial state of LED as turned-off
-  
-  Serial.begin(115200);
   ESP32Encoder::useInternalWeakPullResistors = UP; // Enable the weak pull up resistors
   encoder.attachHalfQuad(33, 27); // Attache pins for use as encoder pins
   encoder.setCount(0);  // set starting count value after attaching
@@ -229,7 +218,6 @@ void setup() {
   timerAlarmEnable(timer0); // enable
   timerAlarmEnable(timer1); // enable
   ledcWrite(ledChannel_PWM, LOW);
-  pwm_sign = MAX_PWM_VOLTAGE;
 
 
   ////////////////////////////////Event//////////////////////////
@@ -237,9 +225,6 @@ void setup() {
   attachInterrupt(BTN, isr, FALLING);  // set the "BTN" pin as the interrupt pin;
   event_timer = millis();
   lastcalc = millis();
-
-
-
 ////////////////// Communication //////////////////////////////////
 
   // Broadcast setup.
@@ -277,7 +262,7 @@ void setup() {
   lasttime = millis();
   DAQState = IDLE;
 
-
+  Serial.print("MLX SETUP Begin");
   if (! mlx.begin(MLX90640_I2CADDR_DEFAULT, &Wire)) {
     Serial.println("MLX90640 not found!");
   } else {
@@ -288,12 +273,13 @@ void setup() {
     Serial.print(mlx.serialNumber[1], HEX);
     Serial.println(mlx.serialNumber[2], HEX);
   }
-
+  Serial.print("Complete");
   mlx.setMode(MLX90640_CHESS);
   mlx.setResolution(MLX90640_ADC_16BIT);
   mlx.setRefreshRate(MLX90640_16_HZ);
   Wire.setClock(1000000); // max 1 MHz
-
+  
+  Serial.print("Setup Complete");
 }
 
 
@@ -301,17 +287,15 @@ void setup() {
 
 void loop() { // main code here, to run repeatedly:
   syncDAQState();
-  Get_Readings();
-  Calculate_Angle();
+  logData(); //data report - controlled by debug modes
+  if ((millis()-lastread)>(1000/read_freq)) {
+    Get_Readings();
+    Calculate_Angle();
+    lastread = millis(); 
+    rd = true;}
   if (deltaT) { //Speed Interrupt Action
-    wheelspd = count/cpr*(100*60); //speed in counts per Timer1 interrupt
-    deltaT = false;
-//    Serial.println("motor_PWM, speed");
-//    Serial.print(motor_PWM);
-//    Serial.print(" ");
-//    Serial.println(v);
-  }
-  logData();
+    wheelspd = 6000*count/cpr; //speed in rpm
+    deltaT = false;  }
   switch (DAQState) {
     case (IDLE):
       if (CommandState == CTDWN) { DAQState = CommandState; }
@@ -327,19 +311,23 @@ void loop() { // main code here, to run repeatedly:
     case (CTDWN): 
       if (CommandState == SEEKMODE) { DAQState = CommandState; }
       digitalWrite(LED_PIN, HIGH);
+//      if (buttonIsPressed == true && millis()-event_timer > del) {
+//        CommandState = IDLE;
+//        event_timer = millis();
+//        buttonIsPressed = false;
+//      }
       if ((millis() - event_timer) > ctdwn_time){
         CommandState = SEEKMODE;
       }
       break;
     case (SEEKMODE):
       if (CommandState == IDLE) { DAQState = CommandState; }
-      ReactionWheelPWM();
-      if (millis() - lasttime > 1/(ctrl_freq)) {
-      Center();
+      if (rd == true) {PID(); rd = false;}
+      ReactionWheelRPM();
       lasttime = millis();
-      }
       if (buttonIsPressed == true && millis()-event_timer > del) {
         CommandState = IDLE;
+        motor_RPM = 0;
         event_timer = millis();
         buttonIsPressed = false;
       }
@@ -357,48 +345,39 @@ void syncDAQState() {
 
 void Get_Readings() {
   // take IR camera readingsn if newtime is over GenDelay-Lasttime
-  mlx.getFrame(frame);
-
-  // Compress to 1D array by averaging
-  int i;
-  int n;
-  float line[WIDTH];
-  for(int col = 0; col < WIDTH; col++){
-    n = 0;
-    for(int row = HEIGHT/2 - RADIUS; row <= HEIGHT/2 + RADIUS; row++){
-      i = WIDTH * row + col;
-      if(!isnan(frame[i])){
-        line[col] += frame[i];
-        n++;
+    mlx.getFrame(frame);
+    // Compress to 1D array by averaging
+    int i;
+    int n;
+    float line[WIDTH];
+    for(int col = 0; col < WIDTH; col++){
+      n = 0;
+      for(int row = HEIGHT/2 - RADIUS; row <= HEIGHT/2 + RADIUS; row++){
+        i = WIDTH * row + col;
+        if(!isnan(frame[i])){
+          line[col] += frame[i];
+          n++;
+        }
+      }
+      line[col] = line[col] / n;
+    }
+    // Blur to smooth data
+    float line_filt[WIDTH];
+    line_filt[0] = 0.25 * line[0] + 0.5 * line[0] + 0.25 * line[1];
+    for(int i = 1; i < WIDTH-1; i++){
+      line_filt[i] = 0.25 * line[i] + 0.5 * line[i+1] + 0.25 * line[i+2];
+    }
+    line_filt[WIDTH-1] = 0.25 * line[WIDTH-2] + 0.5 * line[WIDTH-1] + 0.25 * line[WIDTH-1];
+  
+    // Find max temp location
+    //int iMax = 0;
+    float max = 0;
+    for(int i = 0; i < WIDTH; i++){
+      if(line_filt[i] > max){
+        max = line_filt[i];
+        iMax = i;
       }
     }
-    line[col] = line[col] / n;
-  }
-
-  // Blur to smooth data
-  float line_filt[WIDTH];
-  line_filt[0] = 0.25 * line[0] + 0.5 * line[0] + 0.25 * line[1];
-  for(int i = 1; i < WIDTH-1; i++){
-    line_filt[i] = 0.25 * line[i] + 0.5 * line[i+1] + 0.25 * line[i+2];
-  }
-  line_filt[WIDTH-1] = 0.25 * line[WIDTH-2] + 0.5 * line[WIDTH-1] + 0.25 * line[WIDTH-1];
-
-  // Find max temp location
-  //int iMax = 0;
-  float max = 0;
-  for(int i = 0; i < WIDTH; i++){
-    if(line_filt[i] > max){
-      max = line_filt[i];
-      iMax = i;
-    }
-  }
-  // Serial.print(iMax);
-//  Serial.print("  ");
-//  for(int i = 0; i < WIDTH; i++){
-//    Serial.print(line_filt[i]);
-//    Serial.print(",");
-//  }
-//  Serial.println("");
 }
 
 void Calculate_Angle() {
@@ -406,55 +385,39 @@ void Calculate_Angle() {
   //use angle memory to calculate angular velocity
   error = iMax - WIDTH/2;
   angle = (error*110)/32;
-  deltat = (millis()-lastcalc)*1000;
-  angle_speed = (lastangle-angle)*deltat;
+  angle = angle*0.7 + lastangle*0.3;
+  float deltat = (millis()-lastcalc); //seconds
+//  Serial.print(deltat);
+  angle_speed = (lastangle-angle) / deltat; 
   lastcalc = millis();
   lastangle = angle;
 //  Kalman_Filter(angle, angle_speed)
 }
 
 
-void Center() {
-  PID();         //angle loop PD control
-  // cc++;
-  // if(cc>=6)     //every 6th control loop，enter PI algorithm
-  // {
-  //   SpeedPI();   
-  //   cc=0;  //Clear
-  // }
- 
-  loopcount++;
-  if(loopcount == 1)  { // used to blink LED every 100 control loops.
-    loopcount = 0;
-    digitalWrite(LED_PIN, !digitalRead(LED_PIN));}
+void PID() {
+  positions += (angle + targetAngle);
+  positions = constrain(positions, -355,355); 
+//  Serial.println(positions);
+//  Serial.println(angle_speed);
+  motor_RPM += (kp * (angle + targetAngle) + ki * (positions) - kd * angle_speed);
+  motor_RPM = constrain(motor_RPM, -MAX_RPM, MAX_RPM);
+  digitalWrite(LED_PIN, !digitalRead(LED_PIN));
   }
 
-
-////////////////// Angle PD_pwm ////////////////////
-void PID(){
-  positions += ((angle + targetAngle)*deltat);
-  positions = constrain(positions, -355,355); 
-  motor_RPM = motor_RPM + (kp * (angle + targetAngle) + ki * (positions) - kd * angle_speed); //PD angle loop control
-}
-
-void ReactionWheelPWM(){
-        float err = motor_RPM - wheelspd;
-        SumErr = SumErr + err;
-        D = kp_speed*err + ki_speed*SumErr;
-  
+void ReactionWheelRPM(){
+  float RPMerr = motor_RPM - wheelspd;
+  Serial.print(RPMerr);
+  SumErr += RPMerr;
+  motor_PWM = kp_speed*RPMerr + ki_speed*SumErr; 
+  motor_PWM = constrain(motor_PWM, -MAX_PWM, MAX_PWM); 
   if (motor_PWM > 0) {
-    if (motor_RPM > MAX_RPM) { 
-      motor_RPM = MAX_RPM;
-    }
-    ledcWrite(ledChannel_2, LOW); // clockwise
-    ledcWrite(ledChannel_1, D); // power control while cw
-  } else {
-    motor_RPM = abs(motor_RPM);
-    if (motor_RPM > MAX_RPM) { 
-      motor_RPM = MAX_RPM;
-    }
-    ledcWrite(ledChannel_1, LOW); // ccw
-    ledcWrite(ledChannel_2, D); // power control while ccw
+    ledcWrite(ledChannel_2, motor_PWM); // clockwise
+    ledcWrite(ledChannel_1, LOW); // power control while cw
+  } else { // PWM is commanded negative (ccw)
+    motor_PWM = abs(motor_PWM);
+    ledcWrite(ledChannel_1, motor_PWM); // ccw
+    ledcWrite(ledChannel_2, LOW); // power control while ccw
   }
 }
 
@@ -509,15 +472,18 @@ void logData() {
 }
 
 void printReadings() {
+  Serial.print("Imax: ");
   Serial.print(iMax);
-  Serial.print("   Err: ");
-  Serial.print(error);
   Serial.print("   Ang: ");
   Serial.print(angle);
   Serial.print("   DAQ: ");
   Serial.print(DAQState);
   Serial.print("   CMD: ");
-  Serial.println(CommandState);
+  Serial.print(CommandState);
+  Serial.print("   CommRPM: ");
+  Serial.print(motor_RPM);
+  Serial.print("   RealRPM: ");
+  Serial.println(wheelspd);
 }
 
 void addPacketToQueue() {

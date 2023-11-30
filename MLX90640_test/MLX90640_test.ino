@@ -2,11 +2,11 @@
 
 #define WIDTH  32
 #define HEIGHT 24
-#define RADIUS 8 // vertical distance to look at
+#define RADIUS 2 // vertical distance to look at
 
 Adafruit_MLX90640 mlx;
 float frame[WIDTH*HEIGHT]; // buffer for full frame of temperatures
-
+int lasttime = 0;
 
 void setup() {
   // put your setup code here, to run once:
@@ -71,12 +71,15 @@ void loop() {
 
   int error = iMax - WIDTH/2;
   Serial.print(iMax);
+  Serial.print("   ");
+  Serial.println(millis()-lasttime);
+  lasttime = millis();
   Serial.print("  ");
-  for(int i = 0; i < WIDTH; i++){
-    Serial.print(line_filt[i]);
-    Serial.print(",");
-  }
-  Serial.println("");
+//  for(int i = 0; i < WIDTH; i++){
+//    Serial.print(line_filt[i]);
+//    Serial.print(",");
+//  }
+//  Serial.println("");
   
 
   /* for(int i = 0; i < 767; i++){
