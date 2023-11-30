@@ -103,8 +103,8 @@ int lastcalc = 0;
 ////////////////////// Begin of PID parameters ///////////////////////////////
 // Good YouTube video resource for PID's https://www.youtube.com/watch?v=0vqWyramGy8
 double kp = 4;
-double ki = 0; 
-double kd = 0.0; 
+double ki = 0;
+double kd = 0.0;
 ////////////////////// End of PID parameters /////////////////////////////////
 
 ///////////////////////////////// Begin of PI speed loop Vars //////////////////////
@@ -434,30 +434,24 @@ void Center() {
 void PID(){
   positions += ((angle + targetAngle)*deltat);
   positions = constrain(positions, -355,355); 
-  motor_PWM = motor_PWM + (kp * (angle + targetAngle) + ki * (positions) - kd * angle_speed); //PD angle loop control
+  motor_RPM = motor_RPM + (kp * (angle + targetAngle) + ki * (positions) - kd * angle_speed); //PD angle loop control
 }
 
 void ReactionWheelPWM(){
-    if (deltaT) {
-        portENTER_CRITICAL(&timerMux1);
-        deltaT = false;
-        portEXIT_CRITICAL(&timerMux1);
-        omegaSpeed = count;
-        float err = motor_PWM - omegaSpeed;
+        float err = motor_RPM - wheelspd;
         SumErr = SumErr + err;
         D = kp_speed*err + ki_speed*SumErr;
-    }
   
   if (motor_PWM > 0) {
-    if (motor_PWM > MAX_PWM_VOLTAGE) { 
-      motor_PWM = MAX_PWM_VOLTAGE;
+    if (motor_RPM > MAX_RPM) { 
+      motor_RPM = MAX_RPM;
     }
     ledcWrite(ledChannel_2, LOW); // clockwise
     ledcWrite(ledChannel_1, D); // power control while cw
   } else {
-    motor_PWM = abs(motor_PWM);
-    if (motor_PWM > MAX_PWM_VOLTAGE) { 
-      motor_PWM = MAX_PWM_VOLTAGE;
+    motor_RPM = abs(motor_RPM);
+    if (motor_RPM > MAX_RPM) { 
+      motor_RPM = MAX_RPM;
     }
     ledcWrite(ledChannel_1, LOW); // ccw
     ledcWrite(ledChannel_2, D); // power control while ccw
