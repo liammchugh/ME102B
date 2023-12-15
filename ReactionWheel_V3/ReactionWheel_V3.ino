@@ -24,7 +24,7 @@
 /////////////////////IR SETUP///////////////////////////
 #define WIDTH  32
 #define HEIGHT 24
-#define RADIUS 4 // vertical distance to look at
+#define RADIUS 6 // vertical distance to look at
 Adafruit_MLX90640 mlx;
 int iMax = 0;
 int error = 0;
@@ -86,7 +86,7 @@ const int ledChannel_2 = 2;
 const int ledChannel_PWM = 3;
 const int resolution = 8;
 int motor_PWM = 0;
-int MAX_PWM = 250;
+int MAX_PWM = 255;
 int lastrpm;
 int i = 0;
 float timed = 0;
@@ -94,24 +94,24 @@ int lasttime;
 int sendTime;
 
 ///////////////////// Control Parameters ///////////////////////////
-int read_freq = 16; //SET CONSERVATIVELY - IR CAMERA MAX IS 16
+int read_freq = 8; //SET CONSERVATIVELY - IR CAMERA MAX IS 16
 int lastread = 0;
 int motor_RPM = 0;
-int MAX_RPM = 700;
+int MAX_RPM = 1200;
 int lastcalc = 0;
 float deltat = 0.0; //angle measurement interval
 
 ////////////////////// Begin of PID parameters ///////////////////////////////
 // Good YouTube video resource for PID's https://www.youtube.com/watch?v=0vqWyramGy8
-double kp = 4;
+double kp = 4.5;
 double ki = 0;
-double kd = 0.0;
+double kd = 0.01;
 volatile bool rd = false;
 ////////////////////// End of PID parameters /////////////////////////////////
 
 ///////////////////////////////// Begin of Wheel Speed Ctrl Vars //////////////////////
-double kp_speed = 10; 
-double ki_speed = .72;
+double kp_speed = 1.5; 
+double ki_speed = 0.01;
 double kd_speed = 0; // NOT USED  
 float pwmOut=0;
 float pwmOut2=0; 
@@ -286,6 +286,7 @@ void setup() {
 
 
 void loop() { // main code here, to run repeatedly:
+  ReactionWheelRPM();
   syncDAQState();
   logData(); //data report - controlled by debug modes
   if ((millis()-lastread)>(1000/read_freq)) {
@@ -302,6 +303,7 @@ void loop() { // main code here, to run repeatedly:
       digitalWrite(LED_PIN, LOW);
       ledcWrite(ledChannel_2, LOW);
       ledcWrite(ledChannel_1, LOW);
+      motor_RPM = 200;
       if (buttonIsPressed == true && millis()-event_timer > del) {
         CommandState = CTDWN;
         event_timer = millis();
@@ -323,7 +325,6 @@ void loop() { // main code here, to run repeatedly:
     case (SEEKMODE):
       if (CommandState == IDLE) { DAQState = CommandState; }
       if (rd == true) {PID(); rd = false;}
-      ReactionWheelRPM();
       lasttime = millis();
       if (buttonIsPressed == true && millis()-event_timer > del) {
         CommandState = IDLE;
